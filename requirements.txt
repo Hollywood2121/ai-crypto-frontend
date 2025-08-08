@@ -2,3 +2,7 @@ streamlit
 requests
 streamlit-lottie
 python-dotenv
+streamlit
+requests
+pandas
+streamlit-cookies-manager
