@@ -5,7 +5,7 @@ from streamlit_cookies_manager import EncryptedCookieManager
 
 # ------------------ CONFIG ------------------
 API_URL = st.secrets.get("BACKEND_URL", "https://ai-crypto-predictor.onrender.com")
-COOKIE_PASSWORD = st.secrets.get("COOKIE_PASSWORD", "dev-demo-password-change-me")  # set in Streamlit secrets!
+COOKIE_PASSWORD = st.secrets.get("COOKIE_PASSWORD", "dev-demo-password-change-me")
 
 st.set_page_config(
     page_title="AI Crypto Predictor",
@@ -14,8 +14,8 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-# ------------------ COOKIES (persist auth on refresh) ------------------
-cookies = EncryptedCookieManager(prefix="crypto_", password=COOKIE_PASSWORD)
+# ------------------ COOKIES (rotate prefix to invalidate old cookies) ------------------
+cookies = EncryptedCookieManager(prefix="crypto_v2_", password=COOKIE_PASSWORD)
 if not cookies.ready():
     st.stop()
 
@@ -30,7 +30,7 @@ if "email" not in st.session_state:
 def is_cookie_authed() -> bool:
     return cookies.get("authed") == "1" and bool(cookies.get("email"))
 
-# If cookie says authed AND we have email, skip login; otherwise force login
+# Respect cookies only if both are set
 if is_cookie_authed() and st.session_state.step != "dashboard":
     st.session_state.step = "dashboard"
     st.session_state.email = cookies.get("email", st.session_state.email or "")
@@ -44,7 +44,6 @@ with st.sidebar:
     st.session_state.theme = "dark" if theme_choice == "🌙 Dark" else "light"
     st.divider()
 
-    # Quick health info
     st.caption(f"Backend: {API_URL}")
     if st.button("🔄 Check backend"):
         try:
@@ -52,9 +51,8 @@ with st.sidebar:
             st.json(r.json() if r.ok else {"status": r.status_code, "text": r.text})
         except Exception as e:
             st.error(str(e))
-
     st.divider()
-    # Reset/Logout controls
+
     if st.button("🚪 Log out"):
         if "authed" in cookies: del cookies["authed"]
         if "email" in cookies: del cookies["email"]
@@ -110,7 +108,6 @@ st.markdown(DARK_CSS if st.session_state.theme == "dark" else LIGHT_CSS, unsafe_
 def _extract_error(resp) -> str:
     try:
         j = resp.json()
-        # Try common FastAPI error shapes
         if "detail" in j:
             return str(j["detail"])
         return str(j)
@@ -146,10 +143,18 @@ def list_alerts_api(email: str) -> dict:
         return {"alerts": [], "error": str(e)}
 
 def add_alert_api(email: str, symbol: str, direction: str, percent: float) -> dict:
+    # Try POST first; if 405, fall back to GET /alerts/add
     try:
         payload = {"email": email, "symbol": symbol, "direction": direction, "percent": float(percent)}
         r = requests.post(f"{API_URL}/alerts", json=payload, timeout=15)
-        return r.json() if r.ok else {"success": False, "message": _extract_error(r)}
+        if r.ok:
+            return r.json()
+        if r.status_code == 405:
+            # fallback
+            params = {"email": email, "symbol": symbol, "direction": direction, "percent": float(percent)}
+            g = requests.get(f"{API_URL}/alerts/add", params=params, timeout=15)
+            return g.json() if g.ok else {"success": False, "message": _extract_error(g)}
+        return {"success": False, "message": _extract_error(r)}
     except Exception as e:
         return {"success": False, "message": str(e)}
 
@@ -246,7 +251,7 @@ elif st.session_state.step == "dashboard":
     # Prices/Predictions
     st.markdown('<div class="glass">', unsafe_allow_html=True)
     if refresh:
-        pass  # hook for cache clear later
+        pass
     with st.spinner("Fetching latest prices..."):
         data = fetch_predictions(st.session_state.email)
 
@@ -266,7 +271,7 @@ elif st.session_state.step == "dashboard":
             st.info("No coins returned yet.")
     st.markdown("</div>", unsafe_allow_html=True)
 
-    # ===== Alerts Panel =====
+    # Alerts Panel
     st.markdown("### 🔔 Price Alerts")
     if not st.session_state.email:
         st.warning("Email not found in session. Please log out and log back in.")
@@ -281,7 +286,7 @@ elif st.session_state.step == "dashboard":
         with colD:
             custom = st.number_input("Custom %", min_value=0.1, value=3.0, step=0.1)
         with colE:
-            st.write("")  # spacer
+            st.write("")
             create = st.button("Add Alert")
 
         pct = float(preset) if preset != "Custom" else float(custom)
@@ -295,7 +300,6 @@ elif st.session_state.step == "dashboard":
             else:
                 st.error(f"Failed to save alert: {resp.get('message','unknown error')}")
 
-        # Fetch + render alerts defensively (supports old/new backend shapes)
         alerts_resp = list_alerts_api(st.session_state.email)
         if "error" in alerts_resp:
             st.error(f"Failed to load alerts: {alerts_resp['error']}")
@@ -306,7 +310,7 @@ elif st.session_state.step == "dashboard":
                 sym = a.get("symbol", a.get("coin", "—"))
                 direction = a.get("direction")
                 percent = a.get("percent")
-                alert_text = a.get("alert")  # old mock shape
+                alert_text = a.get("alert")
 
                 c1, c2, c3, c4 = st.columns([2,2,2,1])
                 c1.write(sym)
