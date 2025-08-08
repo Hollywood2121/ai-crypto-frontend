@@ -38,8 +38,10 @@ with st.sidebar:
     st.session_state.theme = "dark" if theme_choice == "🌙 Dark" else "light"
     st.divider()
     if st.button("🚪 Log out"):
-        cookies.delete("authed")
-        cookies.delete("email")
+        if "authed" in cookies:
+            del cookies["authed"]
+        if "email" in cookies:
+            del cookies["email"]
         cookies.save()
         for k in list(st.session_state.keys()):
             del st.session_state[k]
@@ -178,8 +180,8 @@ elif st.session_state.step == "otp":
                 resp = verify_otp(st.session_state.email, otp)
             if resp.get("authenticated"):
                 if st.session_state.get("stay", True):
-                    cookies.set("authed", "1", max_age=60*60*24*7)  # 7 days
-                    cookies.set("email", st.session_state.email, max_age=60*60*24*7)
+                    cookies["authed"] = "1"
+                    cookies["email"] = st.session_state.email
                     cookies.save()
                 st.session_state.step = "dashboard"
                 st.success("✅ Authentication successful!")
@@ -210,7 +212,7 @@ elif st.session_state.step == "dashboard":
     # Prices/Predictions
     st.markdown('<div class="glass">', unsafe_allow_html=True)
     if refresh:
-        pass
+        pass  # hook for cache clear later
     with st.spinner("Fetching latest prices..."):
         data = fetch_predictions(st.session_state.email)
 
