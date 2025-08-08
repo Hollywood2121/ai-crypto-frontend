@@ -53,6 +53,7 @@ with st.sidebar:
     st.markdown("### Live Update")
     st.session_state.auto_refresh = st.toggle("Auto-refresh", value=st.session_state.auto_refresh, help="Refresh dashboard automatically")
     st.session_state.refresh_secs = st.slider("Every (seconds)", min_value=5, max_value=60, value=st.session_state.refresh_secs, step=5)
+
     st.caption(f"Backend: {API_URL}")
     if st.button("🔄 Check backend"):
         try:
@@ -277,8 +278,10 @@ elif st.session_state.step == "dashboard":
     else:
         ts = data.get("timestamp")
         win = data.get("window", st.session_state.window)
+        stale = data.get("stale", False)
         if ts:
-            st.caption(f"Data timestamp (UTC): {ts} • Window: {win}")
+            badge = " • ⚠️ stale (rate-limited)" if stale else ""
+            st.caption(f"Data timestamp (UTC): {ts} • Window: {win}{badge}")
         coins = data.get("coins", [])
         if coins:
             # tiles
