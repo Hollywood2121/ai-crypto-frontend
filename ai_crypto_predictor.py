@@ -1,133 +1,187 @@
 import streamlit as st
 import requests
-import os
-from dotenv import load_dotenv
-import json
+import pandas as pd
 
-load_dotenv()
+# ------------------ CONFIG ------------------
+API_URL = st.secrets.get("BACKEND_URL", "https://ai-crypto-predictor.onrender.com")
 
-API_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
+st.set_page_config(
+    page_title="AI Crypto Predictor",
+    page_icon="📈",
+    layout="wide",
+    initial_sidebar_state="collapsed",
+)
 
-# ----- Streamlit Config -----
-st.set_page_config(page_title="AI Crypto Predictor", layout="wide")
+# ------------------ THEME TOGGLE ------------------
+if "theme" not in st.session_state:
+    st.session_state.theme = "dark"  # default
 
-# ----- Theming -----
-st.markdown("""
-    <style>
-    @import url('https://fonts.googleapis.com/css2?family=Roboto&display=swap');
-    html, body, [class*="css"]  {
-        font-family: 'Roboto', sans-serif;
-        transition: background-color 0.5s ease;
-    }
-    .darkmode {
-        background: linear-gradient(135deg, #1f1f1f, #121212);
-        color: white;
-    }
-    .lightmode {
-        background: linear-gradient(135deg, #f9f9f9, #e6e6e6);
-        color: black;
-    }
-    .glass-card {
-        background: rgba(255, 255, 255, 0.1);
-        border-radius: 16px;
-        padding: 1.5rem;
-        backdrop-filter: blur(10px);
-        border: 1px solid rgba(255, 255, 255, 0.2);
-        box-shadow: 0 8px 32px 0 rgba(0,0,0,0.1);
-        margin-bottom: 1rem;
-    }
-    .metric-container {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 1rem;
-    }
-    </style>
-""", unsafe_allow_html=True)
+with st.sidebar:
+    st.markdown("### Appearance")
+    theme_choice = st.radio("Theme", ["🌙 Dark", "☀️ Light"], index=0 if st.session_state.theme=="dark" else 1)
+    st.session_state.theme = "dark" if theme_choice == "🌙 Dark" else "light"
+    if st.button("🚪 Log out"):
+        for k in list(st.session_state.keys()):
+            del st.session_state[k]
+        st.session_state.step = "email"
+        st.rerun()
 
-# ----- Theme Switcher -----
-mode = st.sidebar.radio("Choose Theme", ["🌙 Dark", "☀️ Light"])
-if mode == "🌙 Dark":
-    st.markdown("<div class='darkmode'>", unsafe_allow_html=True)
-else:
-    st.markdown("<div class='lightmode'>", unsafe_allow_html=True)
+# ------------------ STYLES ------------------
+DARK_CSS = """
+<style>
+body { background-color: #0d1117; color: #ffffff; font-family: 'Segoe UI', sans-serif; }
+.glass { background-color: rgba(255,255,255,0.05); border: 1px solid #30363d; border-radius: 14px;
+         padding: 1.2rem; box-shadow: 0 4px 30px rgba(0,0,0,0.15); backdrop-filter: blur(10px); margin-bottom: 1rem; }
+.metric-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; }
+.metric-tile { background: rgba(255,255,255,0.06); border: 1px solid #2c313a; border-radius: 12px; padding: 0.9rem 1rem; }
+.metric-sym { font-weight: 700; font-size: 1.05rem; margin-bottom: 6px; }
+.metric-val { font-size: 1.1rem; }
+.metric-delta-pos { color: #00e676; }
+.metric-delta-neg { color: #ff5252; }
+.stButton>button { background:#00c853; color:#fff; border-radius:8px; border:0; padding:0.5rem 0.9rem; }
+</style>
+"""
 
-# ----- Session State Init -----
-if "authenticated" not in st.session_state:
-    st.session_state.authenticated = False
-    st.session_state.user_email = None
-    st.session_state.pro = False
+LIGHT_CSS = """
+<style>
+body { background-color: #f6f8fa; color: #0d1117; font-family: 'Segoe UI', sans-serif; }
+.glass { background-color: #ffffff; border: 1px solid #d0d7de; border-radius: 14px;
+         padding: 1.2rem; box-shadow: 0 2px 20px rgba(0,0,0,0.05); margin-bottom: 1rem; }
+.metric-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; }
+.metric-tile { background: #ffffff; border: 1px solid #e5e7eb; border-radius: 12px; padding: 0.9rem 1rem; }
+.metric-sym { font-weight: 700; font-size: 1.05rem; margin-bottom: 6px; }
+.metric-val { font-size: 1.1rem; }
+.metric-delta-pos { color: #0f9d58; }
+.metric-delta-neg { color: #d93025; }
+.stButton>button { background:#0f9d58; color:#fff; border-radius:8px; border:0; padding:0.5rem 0.9rem; }
+</style>
+"""
 
-# ----- Login Flow -----
-def login():
-    st.title("🔐 Secure Login")
-    with st.container():
-        email = st.text_input("Enter your email")
-        if st.button("📩 Send OTP"):
-            try:
-                r = requests.post(f"{API_URL}/send-otp", json={"email": email})
-                if r.ok:
-                    st.session_state.user_email = email
-                    st.success("✅ OTP sent to your email inbox!")
-                else:
-                    st.error("❌ Failed to send OTP. Please double-check your email or server setup.")
-            except Exception as e:
-                st.error("❌ Error while sending OTP.")
-                st.exception(e)
+st.markdown(DARK_CSS if st.session_state.theme == "dark" else LIGHT_CSS, unsafe_allow_html=True)
 
-    if st.session_state.user_email:
-        otp = st.text_input("Enter the OTP sent to your email")
-        if st.button("🔓 Verify OTP"):
-            try:
-                r = requests.post(f"{API_URL}/verify-otp", json={"email": st.session_state.user_email, "otp": otp})
-                if r.ok and r.json().get("authenticated"):
-                    st.session_state.authenticated = True
-                    st.session_state.pro = r.json().get("pro", False)
-                    st.success("🎉 Logged in successfully!")
-                    st.rerun()
-
-                else:
-                    st.error("❌ Invalid OTP or expired")
-            except Exception as e:
-                st.error("❌ Error while verifying OTP")
-                st.exception(e)
-
-# ----- Dashboard -----
-def dashboard():
-    st.title("📊 AI Crypto Market Dashboard")
-    st.markdown("### Welcome back, **{}**".format(st.session_state.user_email))
-
+# ------------------ HELPERS ------------------
+def send_otp(email: str) -> dict:
     try:
-        r = requests.get(f"{API_URL}/predict?email={st.session_state.user_email}")
-        if r.ok:
-            data = r.json()
-            st.subheader("Top Trending Cryptos")
-            with st.container():
-                for coin in data["coins"]:
-                    with st.container():
-                        st.markdown(f"""
-                            <div class='glass-card'>
-                                <h4>{coin['symbol']}</h4>
-                                <p>💲 {coin['price']:.2f} | 📈 {coin['change']}%</p>
-                            </div>
-                        """, unsafe_allow_html=True)
-            if not st.session_state.pro:
-                st.warning("You're currently on the free plan. Upgrade to Pro to unlock all coins and time intervals!")
-                if st.button("🚀 Upgrade to Pro"):
-                    checkout = requests.post(f"{API_URL}/create-checkout-session", json={"email": st.session_state.user_email})
-                    if checkout.ok:
-                        url = checkout.json().get("checkout_url")
-                        st.markdown(f"[💳 Proceed to Payment]({url})")
-        else:
-            st.error("Backend returned an error. Check backend status.")
+        r = requests.post(f"{API_URL}/send-otp", json={"email": email}, timeout=15)
+        return r.json() if r.ok else {"success": False, "message": r.text}
     except Exception as e:
-        st.error("❌ Failed to connect to prediction server.")
-        st.exception(e)
+        return {"success": False, "message": str(e)}
 
-# ----- Route -----
-if not st.session_state.authenticated:
-    login()
+def verify_otp(email: str, otp: str) -> dict:
+    try:
+        r = requests.post(f"{API_URL}/verify-otp", json={"email": email, "otp": otp}, timeout=15)
+        return r.json() if r.ok else {"authenticated": False, "message": r.text}
+    except Exception as e:
+        return {"authenticated": False, "message": str(e)}
+
+def fetch_predictions(email: str) -> dict:
+    try:
+        r = requests.get(f"{API_URL}/predict", params={"email": email}, timeout=20)
+        return r.json() if r.ok else {"error": r.text}
+    except Exception as e:
+        return {"error": str(e)}
+
+def render_metrics(coins: list[dict]):
+    if not coins:
+        st.info("No coins returned yet.")
+        return
+    st.markdown('<div class="metric-grid">', unsafe_allow_html=True)
+    for c in coins:
+        sym = c.get("symbol", "")
+        price = c.get("price", 0.0)
+        delta = float(c.get("change", 0.0))
+        delta_class = "metric-delta-pos" if delta >= 0 else "metric-delta-neg"
+        st.markdown(
+            f"""
+            <div class="metric-tile">
+              <div class="metric-sym">{sym}</div>
+              <div class="metric-val">${price:,.2f}</div>
+              <div class="{delta_class}">{delta:+.2f}%</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    st.markdown("</div>", unsafe_allow_html=True)
+
+# ------------------ SESSION ------------------
+if "step" not in st.session_state:
+    st.session_state.step = "email"
+if "email" not in st.session_state:
+    st.session_state.email = ""
+
+# ------------------ UI FLOW ------------------
+st.title("📈 AI Crypto Predictor")
+
+if st.session_state.step == "email":
+    with st.container():
+        st.markdown('<div class="glass">', unsafe_allow_html=True)
+        email = st.text_input("Email", key="email_input", placeholder="you@example.com")
+        send = st.button("📩 Send OTP", type="primary")
+        st.markdown("</div>", unsafe_allow_html=True)
+        if send:
+            if not email:
+                st.warning("Please enter your email.")
+            else:
+                resp = send_otp(email)
+                if resp.get("success"):
+                    st.session_state.email = email
+                    st.session_state.step = "otp"
+                    st.success("OTP sent! Check your inbox (and spam).")
+                    st.rerun()
+                else:
+                    st.error(f"Failed to send OTP: {resp.get('message', 'unknown error')}")
+
+elif st.session_state.step == "otp":
+    with st.container():
+        st.markdown('<div class="glass">', unsafe_allow_html=True)
+        st.write(f"OTP sent to: **{st.session_state.email}**")
+        otp = st.text_input("Enter 6-digit OTP", max_chars=6)
+        col_a, col_b = st.columns([1,1])
+        verify_btn = col_a.button("🔓 Verify OTP", type="primary")
+        back_btn = col_b.button("← Back")
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    if back_btn:
+        st.session_state.step = "email"
+        st.rerun()
+
+    if verify_btn:
+        resp = verify_otp(st.session_state.email, otp)
+        if resp.get("authenticated"):
+            st.session_state.step = "dashboard"
+            st.success("✅ Authentication successful!")
+            st.rerun()
+        else:
+            st.error(resp.get("message", "❌ Invalid OTP. Please try again."))
+
+elif st.session_state.step == "dashboard":
+    top = st.container()
+    with top:
+        st.markdown('<div class="glass">', unsafe_allow_html=True)
+        left, right = st.columns([3,1])
+        with left:
+            st.subheader("📊 AI Crypto Market Dashboard")
+            st.caption(f"Logged in as: {st.session_state.email}")
+        with right:
+            if st.button("🔄 Refresh"):
+                # For future: add caching and clear here
+                pass
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    with st.container():
+        st.markdown('<div class="glass">', unsafe_allow_html=True)
+        data = fetch_predictions(st.session_state.email)
+        if "error" in data:
+            st.error(f"Error loading predictions: {data['error']}")
+        else:
+            coins = data.get("coins", [])
+            render_metrics(coins)
+            st.markdown("### Details")
+            df = pd.DataFrame(coins)
+            st.dataframe(df, use_container_width=True)
+        st.markdown("</div>", unsafe_allow_html=True)
+
 else:
-    dashboard()
-
-# ----- Close theme wrapper -----
-st.markdown("</div>", unsafe_allow_html=True)
+    # safety: reset unknown states
+    st.session_state.step = "email"
+    st.rerun()
