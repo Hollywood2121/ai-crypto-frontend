@@ -27,10 +27,15 @@ if "step" not in st.session_state:
 if "email" not in st.session_state:
     st.session_state.email = ""
 
-# If cookie says authed, skip login
-if cookies.get("authed") == "1" and st.session_state.step != "dashboard":
+def is_cookie_authed() -> bool:
+    return cookies.get("authed") == "1" and bool(cookies.get("email"))
+
+# If cookie says authed AND we have email, skip login; otherwise force login
+if is_cookie_authed() and st.session_state.step != "dashboard":
     st.session_state.step = "dashboard"
     st.session_state.email = cookies.get("email", st.session_state.email or "")
+elif not is_cookie_authed() and st.session_state.step == "dashboard":
+    st.session_state.step = "email"
 
 # ------------------ SIDEBAR ------------------
 with st.sidebar:
@@ -38,15 +43,33 @@ with st.sidebar:
     theme_choice = st.radio("Theme", ["🌙 Dark", "☀️ Light"], index=0 if st.session_state.theme=="dark" else 1)
     st.session_state.theme = "dark" if theme_choice == "🌙 Dark" else "light"
     st.divider()
+
+    # Quick health info
+    st.caption(f"Backend: {API_URL}")
+    if st.button("🔄 Check backend"):
+        try:
+            r = requests.get(f"{API_URL}/version", timeout=10)
+            st.json(r.json() if r.ok else {"status": r.status_code, "text": r.text})
+        except Exception as e:
+            st.error(str(e))
+
+    st.divider()
+    # Reset/Logout controls
     if st.button("🚪 Log out"):
-        if "authed" in cookies:
-            del cookies["authed"]
-        if "email" in cookies:
-            del cookies["email"]
+        if "authed" in cookies: del cookies["authed"]
+        if "email" in cookies: del cookies["email"]
         cookies.save()
         for k in list(st.session_state.keys()):
             del st.session_state[k]
         st.session_state.theme = "dark"
+        st.session_state.step = "email"
+        st.rerun()
+
+    if st.button("🧹 Reset cookies"):
+        for k in list(cookies.keys()):
+            del cookies[k]
+        cookies.save()
+        st.success("Cookies cleared. Please log in again.")
         st.session_state.step = "email"
         st.rerun()
 
@@ -84,31 +107,41 @@ body { background-color: #f6f8fa; color: #0d1117; font-family: 'Segoe UI', sans-
 st.markdown(DARK_CSS if st.session_state.theme == "dark" else LIGHT_CSS, unsafe_allow_html=True)
 
 # ------------------ HELPERS ------------------
+def _extract_error(resp) -> str:
+    try:
+        j = resp.json()
+        # Try common FastAPI error shapes
+        if "detail" in j:
+            return str(j["detail"])
+        return str(j)
+    except Exception:
+        return resp.text
+
 def send_otp(email: str) -> dict:
     try:
         r = requests.post(f"{API_URL}/send-otp", json={"email": email}, timeout=15)
-        return r.json() if r.ok else {"success": False, "message": r.text}
+        return r.json() if r.ok else {"success": False, "message": _extract_error(r)}
     except Exception as e:
         return {"success": False, "message": str(e)}
 
 def verify_otp(email: str, otp: str) -> dict:
     try:
         r = requests.post(f"{API_URL}/verify-otp", json={"email": email, "otp": otp}, timeout=15)
-        return r.json() if r.ok else {"authenticated": False, "message": r.text}
+        return r.json() if r.ok else {"authenticated": False, "message": _extract_error(r)}
     except Exception as e:
         return {"authenticated": False, "message": str(e)}
 
 def fetch_predictions(email: str) -> dict:
     try:
         r = requests.get(f"{API_URL}/predict", params={"email": email}, timeout=20)
-        return r.json() if r.ok else {"error": r.text}
+        return r.json() if r.ok else {"error": _extract_error(r)}
     except Exception as e:
         return {"error": str(e)}
 
 def list_alerts_api(email: str) -> dict:
     try:
         r = requests.get(f"{API_URL}/alerts", params={"email": email}, timeout=15)
-        return r.json() if r.ok else {"alerts": []}
+        return r.json() if r.ok else {"alerts": [], "error": _extract_error(r)}
     except Exception as e:
         return {"alerts": [], "error": str(e)}
 
@@ -116,17 +149,17 @@ def add_alert_api(email: str, symbol: str, direction: str, percent: float) -> di
     try:
         payload = {"email": email, "symbol": symbol, "direction": direction, "percent": float(percent)}
         r = requests.post(f"{API_URL}/alerts", json=payload, timeout=15)
-        return r.json() if r.ok else {"success": False}
+        return r.json() if r.ok else {"success": False, "message": _extract_error(r)}
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        return {"success": False, "message": str(e)}
 
 def delete_alert_api(email: str, symbol: str, direction: str, percent: float) -> dict:
     try:
         params = {"email": email, "symbol": symbol, "direction": direction, "percent": float(percent)}
         r = requests.delete(f"{API_URL}/alerts", params=params, timeout=15)
-        return r.json() if r.ok else {"success": False}
+        return r.json() if r.ok else {"success": False, "message": _extract_error(r)}
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        return {"success": False, "message": str(e)}
 
 def render_metrics(coins: list[dict]):
     st.markdown('<div class="metric-grid">', unsafe_allow_html=True)
@@ -235,64 +268,70 @@ elif st.session_state.step == "dashboard":
 
     # ===== Alerts Panel =====
     st.markdown("### 🔔 Price Alerts")
-    colA, colB, colC, colD, colE = st.columns([2,1.5,1.5,2,1])
-    with colA:
-        coin = st.selectbox("Coin", ["BTC","ETH","SOL","ADA","XRP","BNB","DOGE","AVAX","MATIC","LTC"])
-    with colB:
-        direction = st.selectbox("Direction", ["UP","DOWN"])
-    with colC:
-        preset = st.selectbox("Percent preset", ["1","2","5","10","Custom"])
-    with colD:
-        custom = st.number_input("Custom %", min_value=0.1, value=3.0, step=0.1)
-    with colE:
-        st.write("")  # spacer
-        create = st.button("Add Alert")
-
-    pct = float(preset) if preset != "Custom" else float(custom)
-
-    if create:
-        with st.spinner("Saving alert..."):
-            resp = add_alert_api(st.session_state.email, coin, direction, pct)
-        if resp.get("success"):
-            st.success(f"Added alert: {coin} {direction} {pct:.2f}%")
-            st.rerun()
-        else:
-            st.error("Failed to save alert.")
-
-    # Fetch + render alerts defensively (supports old/new backend shapes)
-    alerts_resp = list_alerts_api(st.session_state.email)
-    alerts = alerts_resp.get("alerts", [])
-    if alerts:
-        st.write("**Your alerts:**")
-        for i, a in enumerate(alerts, start=1):
-            sym = a.get("symbol", a.get("coin", "—"))
-            direction = a.get("direction")
-            percent = a.get("percent")
-            alert_text = a.get("alert")  # old mock shape
-
-            c1, c2, c3, c4 = st.columns([2,2,2,1])
-            c1.write(sym)
-            if alert_text:
-                # old mock: just show the text, no delete button
-                c2.write("—")
-                c3.write(alert_text)
-                c4.write("—")
-            else:
-                c2.write(direction or "—")
-                try:
-                    c3.write(f"{float(percent):.2f}%")
-                except Exception:
-                    c3.write("—")
-                # Delete only if we have the new shape
-                if direction is not None and percent is not None:
-                    if c4.button("Delete", key=f"del_{i}"):
-                        with st.spinner("Removing..."):
-                            delete_alert_api(st.session_state.email, sym, direction, float(percent))
-                        st.rerun()
-                else:
-                    c4.write("—")
+    if not st.session_state.email:
+        st.warning("Email not found in session. Please log out and log back in.")
     else:
-        st.caption("You have no alerts yet.")
+        colA, colB, colC, colD, colE = st.columns([2,1.5,1.5,2,1])
+        with colA:
+            coin = st.selectbox("Coin", ["BTC","ETH","SOL","ADA","XRP","BNB","DOGE","AVAX","MATIC","LTC"])
+        with colB:
+            direction = st.selectbox("Direction", ["UP","DOWN"])
+        with colC:
+            preset = st.selectbox("Percent preset", ["1","2","5","10","Custom"])
+        with colD:
+            custom = st.number_input("Custom %", min_value=0.1, value=3.0, step=0.1)
+        with colE:
+            st.write("")  # spacer
+            create = st.button("Add Alert")
+
+        pct = float(preset) if preset != "Custom" else float(custom)
+
+        if create:
+            with st.spinner("Saving alert..."):
+                resp = add_alert_api(st.session_state.email, coin, direction, pct)
+            if resp.get("success"):
+                st.success(f"Added alert: {coin} {direction} {pct:.2f}%")
+                st.rerun()
+            else:
+                st.error(f"Failed to save alert: {resp.get('message','unknown error')}")
+
+        # Fetch + render alerts defensively (supports old/new backend shapes)
+        alerts_resp = list_alerts_api(st.session_state.email)
+        if "error" in alerts_resp:
+            st.error(f"Failed to load alerts: {alerts_resp['error']}")
+        alerts = alerts_resp.get("alerts", [])
+        if alerts:
+            st.write("**Your alerts:**")
+            for i, a in enumerate(alerts, start=1):
+                sym = a.get("symbol", a.get("coin", "—"))
+                direction = a.get("direction")
+                percent = a.get("percent")
+                alert_text = a.get("alert")  # old mock shape
+
+                c1, c2, c3, c4 = st.columns([2,2,2,1])
+                c1.write(sym)
+                if alert_text:
+                    c2.write("—")
+                    c3.write(alert_text)
+                    c4.write("—")
+                else:
+                    c2.write(direction or "—")
+                    try:
+                        c3.write(f"{float(percent):.2f}%")
+                    except Exception:
+                        c3.write("—")
+                    if direction is not None and percent is not None:
+                        if c4.button("Delete", key=f"del_{i}"):
+                            with st.spinner("Removing..."):
+                                resp = delete_alert_api(st.session_state.email, sym, direction, float(percent))
+                            if resp.get("success"):
+                                st.rerun()
+                            else:
+                                st.error(f"Failed to delete: {resp.get('message','unknown error')}")
+                    else:
+                        c4.write("—")
+        else:
+            st.caption("You have no alerts yet.")
 
 else:
     st.session_state.step = "email"
