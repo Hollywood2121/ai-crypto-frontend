@@ -5,7 +5,7 @@ from streamlit_cookies_manager import EncryptedCookieManager
 
 # ------------------ CONFIG ------------------
 API_URL = st.secrets.get("BACKEND_URL", "https://ai-crypto-predictor.onrender.com")
-COOKIE_PASSWORD = st.secrets.get("COOKIE_PASSWORD", "dev-demo-password-change-me")  # <-- set in Streamlit secrets!
+COOKIE_PASSWORD = st.secrets.get("COOKIE_PASSWORD", "dev-demo-password-change-me")  # set in Streamlit secrets!
 
 st.set_page_config(
     page_title="AI Crypto Predictor",
@@ -233,7 +233,7 @@ elif st.session_state.step == "dashboard":
             st.info("No coins returned yet.")
     st.markdown("</div>", unsafe_allow_html=True)
 
-    # Alerts Panel
+    # ===== Alerts Panel =====
     st.markdown("### 🔔 Price Alerts")
     colA, colB, colC, colD, colE = st.columns([2,1.5,1.5,2,1])
     with colA:
@@ -259,19 +259,38 @@ elif st.session_state.step == "dashboard":
         else:
             st.error("Failed to save alert.")
 
+    # Fetch + render alerts defensively (supports old/new backend shapes)
     alerts_resp = list_alerts_api(st.session_state.email)
     alerts = alerts_resp.get("alerts", [])
     if alerts:
         st.write("**Your alerts:**")
         for i, a in enumerate(alerts, start=1):
+            sym = a.get("symbol", a.get("coin", "—"))
+            direction = a.get("direction")
+            percent = a.get("percent")
+            alert_text = a.get("alert")  # old mock shape
+
             c1, c2, c3, c4 = st.columns([2,2,2,1])
-            c1.write(a["symbol"])
-            c2.write(a["direction"])
-            c3.write(f'{float(a["percent"]):.2f}%')
-            if c4.button("Delete", key=f"del_{i}"):
-                with st.spinner("Removing..."):
-                    delete_alert_api(st.session_state.email, a["symbol"], a["direction"], float(a["percent"]))
-                st.rerun()
+            c1.write(sym)
+            if alert_text:
+                # old mock: just show the text, no delete button
+                c2.write("—")
+                c3.write(alert_text)
+                c4.write("—")
+            else:
+                c2.write(direction or "—")
+                try:
+                    c3.write(f"{float(percent):.2f}%")
+                except Exception:
+                    c3.write("—")
+                # Delete only if we have the new shape
+                if direction is not None and percent is not None:
+                    if c4.button("Delete", key=f"del_{i}"):
+                        with st.spinner("Removing..."):
+                            delete_alert_api(st.session_state.email, sym, direction, float(percent))
+                        st.rerun()
+                else:
+                    c4.write("—")
     else:
         st.caption("You have no alerts yet.")
 
