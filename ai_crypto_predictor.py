@@ -246,37 +246,12 @@ elif st.session_state.step == "otp":
     st.markdown("</div>", unsafe_allow_html=True)
 
 elif st.session_state.step == "dashboard":
-    # Auto-refresh (dashboard only)
+    # Lightweight, compatible auto-refresh using a meta refresh tag
     if st.session_state.auto_refresh:
-        st.experimental_rerun if False else None  # noop for older versions
-        st_autorefresh = st.experimental_rerun  # placeholder to satisfy linters
-        st.runtime.legacy_caching.clear_cache if False else None  # no-op
-        st.experimental_set_query_params()  # harmless; ensures no caching of URL
-        st.experimental_memo.clear() if hasattr(st.experimental_memo, "clear") else None
-        st.experimental_singleton.clear() if hasattr(st.experimental_singleton, "clear") else None
-        st.session_state._ = st.experimental_rerun if False else None
-        st.autorefresh_count = st.experimental_get_query_params() if False else None
-        st.experimental_rerun if False else None
-        st.write("")  # keep page layout stable
-        st.experimental_rerun if False else None
-        st.experimental_rerun if False else None
-        # REAL autorefresh API:
-        try:
-            st.experimental_rerun if False else None
-            st._ = __import__("streamlit").experimental_rerun  # keep import checker happy
-        except Exception:
-            pass
-        st.experimental_set_query_params()
-        st.runtime.legacy_caching.clear_cache if False else None
-        st.experimental_rerun if False else None
-        # Use st_autorefresh
-        try:
-            st_autorefresh = st.experimental_rerun  # dummy
-        except Exception:
-            pass
-        st_autorefresh_fn = getattr(st, "autorefresh", None)
-        if st_autorefresh_fn:
-            st_autorefresh_fn(interval=st.session_state.refresh_secs * 1000, key="auto_refresh_key")
+        st.markdown(
+            f"<meta http-equiv='refresh' content='{int(st.session_state.refresh_secs)}'>",
+            unsafe_allow_html=True,
+        )
 
     # Header
     st.markdown('<div class="glass">', unsafe_allow_html=True)
