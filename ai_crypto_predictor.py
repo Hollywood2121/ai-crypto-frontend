@@ -14,8 +14,8 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-# ------------------ COOKIES (prefix v2) ------------------
-cookies = EncryptedCookieManager(prefix="crypto_v2_", password=COOKIE_PASSWORD)
+# ------------------ COOKIES (prefix v3 to invalidate previous logins) ------------------
+cookies = EncryptedCookieManager(prefix="crypto_v3_", password=COOKIE_PASSWORD)
 if not cookies.ready():
     st.stop()
 
