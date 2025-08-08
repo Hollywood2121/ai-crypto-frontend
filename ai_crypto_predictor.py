@@ -5,6 +5,7 @@ from streamlit_cookies_manager import EncryptedCookieManager
 
 # ------------------ CONFIG ------------------
 API_URL = st.secrets.get("BACKEND_URL", "https://ai-crypto-predictor.onrender.com")
+COOKIE_PASSWORD = st.secrets.get("COOKIE_PASSWORD", "dev-demo-password-change-me")  # <-- set in Streamlit secrets!
 
 st.set_page_config(
     page_title="AI Crypto Predictor",
@@ -14,7 +15,7 @@ st.set_page_config(
 )
 
 # ------------------ COOKIES (persist auth on refresh) ------------------
-cookies = EncryptedCookieManager(prefix="crypto_", password=None)
+cookies = EncryptedCookieManager(prefix="crypto_", password=COOKIE_PASSWORD)
 if not cookies.ready():
     st.stop()
 
