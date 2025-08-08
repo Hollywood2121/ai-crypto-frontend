@@ -12,17 +12,23 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-# ------------------ THEME TOGGLE ------------------
+# ------------------ THEME TOGGLE + LOGOUT ------------------
 if "theme" not in st.session_state:
     st.session_state.theme = "dark"  # default
+if "step" not in st.session_state:
+    st.session_state.step = "email"
+if "email" not in st.session_state:
+    st.session_state.email = ""
 
 with st.sidebar:
     st.markdown("### Appearance")
-    theme_choice = st.radio("Theme", ["🌙 Dark", "☀️ Light"], index=0 if st.session_state.theme=="dark" else 1)
+    theme_choice = st.radio("Theme", ["🌙 Dark", "☀️ Light"], index=0 if st.session_state.theme == "dark" else 1)
     st.session_state.theme = "dark" if theme_choice == "🌙 Dark" else "light"
+    st.divider()
     if st.button("🚪 Log out"):
         for k in list(st.session_state.keys()):
             del st.session_state[k]
+        st.session_state.theme = "dark"
         st.session_state.step = "email"
         st.rerun()
 
@@ -56,7 +62,6 @@ body { background-color: #f6f8fa; color: #0d1117; font-family: 'Segoe UI', sans-
 .stButton>button { background:#0f9d58; color:#fff; border-radius:8px; border:0; padding:0.5rem 0.9rem; }
 </style>
 """
-
 st.markdown(DARK_CSS if st.session_state.theme == "dark" else LIGHT_CSS, unsafe_allow_html=True)
 
 # ------------------ HELPERS ------------------
@@ -88,7 +93,7 @@ def render_metrics(coins: list[dict]):
     st.markdown('<div class="metric-grid">', unsafe_allow_html=True)
     for c in coins:
         sym = c.get("symbol", "")
-        price = c.get("price", 0.0)
+        price = float(c.get("price", 0.0))
         delta = float(c.get("change", 0.0))
         delta_class = "metric-delta-pos" if delta >= 0 else "metric-delta-neg"
         st.markdown(
@@ -102,12 +107,6 @@ def render_metrics(coins: list[dict]):
             unsafe_allow_html=True,
         )
     st.markdown("</div>", unsafe_allow_html=True)
-
-# ------------------ SESSION ------------------
-if "step" not in st.session_state:
-    st.session_state.step = "email"
-if "email" not in st.session_state:
-    st.session_state.email = ""
 
 # ------------------ UI FLOW ------------------
 st.title("📈 AI Crypto Predictor")
@@ -163,19 +162,26 @@ elif st.session_state.step == "dashboard":
             st.subheader("📊 AI Crypto Market Dashboard")
             st.caption(f"Logged in as: {st.session_state.email}")
         with right:
-            if st.button("🔄 Refresh"):
-                # For future: add caching and clear here
-                pass
+            refresh = st.button("🔄 Refresh")
         st.markdown("</div>", unsafe_allow_html=True)
 
     with st.container():
         st.markdown('<div class="glass">', unsafe_allow_html=True)
+        if refresh:
+            pass  # hook in cache clear later if you add caching
+
         data = fetch_predictions(st.session_state.email)
         if "error" in data:
             st.error(f"Error loading predictions: {data['error']}")
         else:
+            # Timestamp from backend
+            ts = data.get("timestamp")
+            if ts:
+                st.caption(f"Data timestamp (UTC): {ts}")
+
             coins = data.get("coins", [])
             render_metrics(coins)
+
             st.markdown("### Details")
             df = pd.DataFrame(coins)
             st.dataframe(df, use_container_width=True)
