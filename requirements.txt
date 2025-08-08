@@ -1,8 +1,4 @@
-streamlit
-requests
-streamlit-lottie
-python-dotenv
-streamlit
-requests
-pandas
-streamlit-cookies-manager
+streamlit==1.48.0
+requests==2.32.4
+pandas==2.3.1
+streamlit-cookies-manager==0.2.0
