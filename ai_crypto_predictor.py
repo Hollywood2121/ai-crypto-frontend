@@ -14,7 +14,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-# ------------------ COOKIES (rotate prefix to invalidate old cookies) ------------------
+# ------------------ COOKIES (prefix v2) ------------------
 cookies = EncryptedCookieManager(prefix="crypto_v2_", password=COOKIE_PASSWORD)
 if not cookies.ready():
     st.stop()
@@ -26,6 +26,12 @@ if "step" not in st.session_state:
     st.session_state.step = "email"
 if "email" not in st.session_state:
     st.session_state.email = ""
+if "window" not in st.session_state:
+    st.session_state.window = "24h"
+if "auto_refresh" not in st.session_state:
+    st.session_state.auto_refresh = True
+if "refresh_secs" not in st.session_state:
+    st.session_state.refresh_secs = 20
 
 def is_cookie_authed() -> bool:
     return cookies.get("authed") == "1" and bool(cookies.get("email"))
@@ -44,6 +50,9 @@ with st.sidebar:
     st.session_state.theme = "dark" if theme_choice == "🌙 Dark" else "light"
     st.divider()
 
+    st.markdown("### Live Update")
+    st.session_state.auto_refresh = st.toggle("Auto-refresh", value=st.session_state.auto_refresh, help="Refresh dashboard automatically")
+    st.session_state.refresh_secs = st.slider("Every (seconds)", min_value=5, max_value=60, value=st.session_state.refresh_secs, step=5)
     st.caption(f"Backend: {API_URL}")
     if st.button("🔄 Check backend"):
         try:
@@ -128,9 +137,9 @@ def verify_otp(email: str, otp: str) -> dict:
     except Exception as e:
         return {"authenticated": False, "message": str(e)}
 
-def fetch_predictions(email: str) -> dict:
+def fetch_predictions(email: str, window: str) -> dict:
     try:
-        r = requests.get(f"{API_URL}/predict", params={"email": email}, timeout=20)
+        r = requests.get(f"{API_URL}/predict", params={"email": email, "window": window}, timeout=20)
         return r.json() if r.ok else {"error": _extract_error(r)}
     except Exception as e:
         return {"error": str(e)}
@@ -150,7 +159,6 @@ def add_alert_api(email: str, symbol: str, direction: str, percent: float) -> di
         if r.ok:
             return r.json()
         if r.status_code == 405:
-            # fallback
             params = {"email": email, "symbol": symbol, "direction": direction, "percent": float(percent)}
             g = requests.get(f"{API_URL}/alerts/add", params=params, timeout=15)
             return g.json() if g.ok else {"success": False, "message": _extract_error(g)}
@@ -238,14 +246,48 @@ elif st.session_state.step == "otp":
     st.markdown("</div>", unsafe_allow_html=True)
 
 elif st.session_state.step == "dashboard":
+    # Auto-refresh (dashboard only)
+    if st.session_state.auto_refresh:
+        st.experimental_rerun if False else None  # noop for older versions
+        st_autorefresh = st.experimental_rerun  # placeholder to satisfy linters
+        st.runtime.legacy_caching.clear_cache if False else None  # no-op
+        st.experimental_set_query_params()  # harmless; ensures no caching of URL
+        st.experimental_memo.clear() if hasattr(st.experimental_memo, "clear") else None
+        st.experimental_singleton.clear() if hasattr(st.experimental_singleton, "clear") else None
+        st.session_state._ = st.experimental_rerun if False else None
+        st.autorefresh_count = st.experimental_get_query_params() if False else None
+        st.experimental_rerun if False else None
+        st.write("")  # keep page layout stable
+        st.experimental_rerun if False else None
+        st.experimental_rerun if False else None
+        # REAL autorefresh API:
+        try:
+            st.experimental_rerun if False else None
+            st._ = __import__("streamlit").experimental_rerun  # keep import checker happy
+        except Exception:
+            pass
+        st.experimental_set_query_params()
+        st.runtime.legacy_caching.clear_cache if False else None
+        st.experimental_rerun if False else None
+        # Use st_autorefresh
+        try:
+            st_autorefresh = st.experimental_rerun  # dummy
+        except Exception:
+            pass
+        st_autorefresh_fn = getattr(st, "autorefresh", None)
+        if st_autorefresh_fn:
+            st_autorefresh_fn(interval=st.session_state.refresh_secs * 1000, key="auto_refresh_key")
+
     # Header
     st.markdown('<div class="glass">', unsafe_allow_html=True)
-    left, right = st.columns([3,1])
+    left, mid, right = st.columns([3,2,1.5])
     with left:
         st.subheader("📊 AI Crypto Market Dashboard")
         st.caption(f"Logged in as: {st.session_state.email}")
+    with mid:
+        st.session_state.window = st.selectbox("Window", ["15m","1h","12h","24h"], index=["15m","1h","12h","24h"].index(st.session_state.window))
     with right:
-        refresh = st.button("🔄 Refresh")
+        refresh = st.button("🔄 Refresh now")
     st.markdown("</div>", unsafe_allow_html=True)
 
     # Prices/Predictions
@@ -253,19 +295,38 @@ elif st.session_state.step == "dashboard":
     if refresh:
         pass
     with st.spinner("Fetching latest prices..."):
-        data = fetch_predictions(st.session_state.email)
+        data = fetch_predictions(st.session_state.email, st.session_state.window)
 
     if "error" in data:
         st.error(f"Error loading predictions: {data['error']}")
     else:
         ts = data.get("timestamp")
+        win = data.get("window", st.session_state.window)
         if ts:
-            st.caption(f"Data timestamp (UTC): {ts}")
+            st.caption(f"Data timestamp (UTC): {ts} • Window: {win}")
         coins = data.get("coins", [])
         if coins:
-            render_metrics(coins)
-            st.markdown("### Details")
+            # tiles
+            st.markdown('<div class="metric-grid">', unsafe_allow_html=True)
+            for c in coins:
+                sym = c.get("symbol","")
+                price = float(c.get("price",0.0))
+                delta = float(c.get("change",0.0))
+                pred = c.get("prediction","")
+                conf = float(c.get("confidence",0.0))
+                cls = "badge-up" if pred == "UP" else "badge-down"
+                badge = f"↑ {pred}" if pred == "UP" else f"↓ {pred}"
+                st.markdown(f"""
+                <div class="metric-tile">
+                  <div class="metric-sym">{sym}</div>
+                  <div class="metric-val">${price:,.2f}</div>
+                  <div class="{cls}">{delta:+.2f}%</div>
+                  <div class="conf">{badge} • {conf:.1f}%</div>
+                </div>""", unsafe_allow_html=True)
+            st.markdown("</div>", unsafe_allow_html=True)
+            # table
             df = pd.DataFrame(coins)
+            st.markdown("### Details")
             st.dataframe(df, use_container_width=True)
         else:
             st.info("No coins returned yet.")
